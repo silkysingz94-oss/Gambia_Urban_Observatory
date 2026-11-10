@@ -260,7 +260,7 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
   <div class="control">
     <label>Upload population / indicator CSV</label>
     <input type="file" id="csvFile" accept=".csv,.zip">
-    <div class="help">Upload a CSV or ZIP archive. The repository ZIP is read from population/population.csv inside the archive.</div>
+    <div class="help">Upload a CSV or ZIP archive. The repository ZIP is read from Population/Population.csv inside the archive.</div>
   </div>
   <div class="control">
     <label>Join key in boundary data</label>
@@ -595,7 +595,7 @@ async function readCSVAsset(path,url){
   if(/\.zip$/i.test(path)){
     if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
     const archive=await JSZip.loadAsync(await response.arrayBuffer());
-    // The repository archive stores the population table in population/population.csv.
+    // The repository archive stores the population table in Population/Population.csv.
     // Match ZIP member paths (including nested folders), not just root-level CSV files.
     const entries=Object.values(archive.files).filter(f=>!f.dir&&/\.csv$/i.test(f.name));
     if(!entries.length)throw new Error("No CSV file was found inside "+path);
@@ -677,7 +677,7 @@ async function autoLoadGithubAssets(manual=false){
         }
       }catch(e){console.warn("Skipped GitHub JSON asset",path,e);}
     }
-    // Prefer Population.zip; inside it prioritise population/population.csv, including nested ZIP folders.
+    // Prefer Population.zip; inside it prioritise Population/Population.csv, including nested ZIP folders.
     const orderedStats=stats.slice().sort((a,b)=>{
       const score=p=>(/population\.zip$/i.test(p)?200:0)+(/population/i.test(p)?100:0)+(/\.zip$/i.test(p)?20:0);
       return score(b)-score(a);
@@ -836,7 +836,7 @@ $("csvFile").addEventListener("change",async e=>{
       if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
       const archive=await JSZip.loadAsync(await file.arrayBuffer());
       const entries=Object.values(archive.files).filter(f=>!f.dir&&/\.csv$/i.test(f.name));
-      if(!entries.length)throw new Error("No CSV file found inside the ZIP archive. Check that the ZIP contains population/population.csv.");
+      if(!entries.length)throw new Error("No CSV file found inside the ZIP archive. Check that the ZIP contains Population/Population.csv.");
       const score=n=>{const v=String(n||"").replace(/\\/g,"/").toLowerCase().replace(/^\.\//,"");return (/(^|\/)population\/population\.csv$/.test(v)?1000:0)+(/(^|\/)population\.csv$/.test(v)?500:0)+(/population/i.test(v)?100:0);};
       entries.sort((a,b)=>score(b.name)-score(a.name)||a.name.localeCompare(b.name));
       let loaded=false,lastError=null;
