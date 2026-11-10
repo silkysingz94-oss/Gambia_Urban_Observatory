@@ -636,7 +636,7 @@ async function autoLoadGithubAssets(manual=false){
     const response=await fetch(api,{headers:{"Accept":"application/vnd.github+json"}});
     if(!response.ok)throw new Error("GitHub API HTTP "+response.status);
     const tree=await response.json(),paths=(tree.tree||[]).filter(x=>x.type==="blob").map(x=>x.path);
-    const geo=paths.filter(p=>/\.(geojson|json)$/i.test(p)&&!/package(-lock)?\.json$/i.test(p)&&!/\.github\\//i.test(p));
+    const geo=paths.filter(p=>/\.(geojson|json)$/i.test(p)&&!/package(-lock)?\.json$/i.test(p)&&!/\.github\//i.test(p));
     const csv=paths.filter(p=>/\.csv$/i.test(p));
     const zip=paths.filter(p=>/\.zip$/i.test(p)&&/population/i.test(p));
     const stats=csv.concat(zip);
