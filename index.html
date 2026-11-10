@@ -288,7 +288,8 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
       <option value="dark">Dark</option>
     </select>
   </div>
-  <label class="checkrow"><input type="checkbox" id="extrusionCheck" checked onchange="toggle3D()"> 3D buildings</label>
+  <label class="checkrow"><input type="checkbox" id="extrusionCheck" checked onchange="toggle3D()"> 3D EA indicator extrusion</label>
+  <label class="checkrow"><input type="checkbox" id="buildingCheck" checked onchange="toggleBuildings()"> 3D buildings</label>
   <label class="checkrow"><input type="checkbox" id="boundaryCheck" checked onchange="toggleBoundaries()"> Administrative boundaries</label>
   <label class="checkrow"><input type="checkbox" id="labelsCheck" checked onchange="toggleLabels()"> Area labels</label>
 
@@ -514,6 +515,20 @@ function addBoundaryLayers() {
           ["coalesce",["get","__mapColor"],"#8fb9d8"]
         ],
         "fill-opacity":0.25
+      }
+    });
+    map.addLayer({
+      id:"admin-extrusion",type:"fill-extrusion",source:"admin-boundaries",
+      paint:{
+        "fill-extrusion-color":[
+          "case",
+          ["boolean",["feature-state","selected"],false],"#2376c9",
+          ["coalesce",["get","__mapColor"],"#8fb9d8"]
+        ],
+        "fill-extrusion-height":["coalesce",["get","__3dHeight"],0],
+        "fill-extrusion-base":0,
+        "fill-extrusion-opacity":0.84,
+        "fill-extrusion-vertical-gradient":true
       }
     });
     map.addLayer({
@@ -822,15 +837,23 @@ function updateTable(features) {
 }
 function updateMapColors(features) {
   if(!boundaryData)return;
-  const vals=features.map(indicatorValue).filter(v=>v!==null);
+  const vals=boundaryData.features.map(indicatorValue)
+    .filter(v=>v!==null && Number.isFinite(v) && v>=0);
   const max=Math.max(...vals,0);
+
   boundaryData.features.forEach(f=>{
     const v=indicatorValue(f);
-    f.properties.__mapColor=v===null?"#e8a43a":
+    const valid=v!==null && Number.isFinite(v) && v>=0;
+    f.properties.__mapColor=!valid?"#e8a43a":
       max===0?"#9bc8e5":
-      v/max>.75?"#155b91":v/max>.5?"#3685b8":v/max>.25?"#7bb5d7":"#c6e0ef";
+      v/max>.75?"#155b91":
+      v/max>.5?"#3685b8":
+      v/max>.25?"#7bb5d7":"#c6e0ef";
+    // Relative display height, not physical elevation or building height.
+    f.properties.__3dHeight=valid && max>0 ? 1200*(v/max) : 0;
   });
   updateBoundarySource();
+  toggle3D();
 }
 function selectFeature(id) {
   selectedFeatureId=String(id);
@@ -872,13 +895,18 @@ function changeBasemap() {
     addBoundaryLayers();
     updateBoundarySource();
     toggle3D();
+    toggleBuildings();
     toggleBoundaries();
     toggleLabels();
   });
 }
 function toggle3D() {
-  if(!map.getLayer("3d-buildings"))return;
-  map.setLayoutProperty("3d-buildings","visibility",$("extrusionCheck").checked?"visible":"none");
+  if(!map || !map.getLayer("admin-extrusion"))return;
+  map.setLayoutProperty("admin-extrusion","visibility",$("extrusionCheck").checked?"visible":"none");
+}
+function toggleBuildings() {
+  if(!map || !map.getLayer("3d-buildings"))return;
+  map.setLayoutProperty("3d-buildings","visibility",$("buildingCheck").checked?"visible":"none");
 }
 function toggleBoundaries() {
   ["admin-fill","admin-outline"].forEach(id=>{
@@ -939,6 +967,7 @@ function resetDashboard() {
   $("basemapSelect").value="liberty";
   $("mapStyleQuick").value="liberty";
   $("extrusionCheck").checked=true;
+  $("buildingCheck").checked=true;
   $("boundaryCheck").checked=true;
   $("labelsCheck").checked=true;
   clearSelection();
