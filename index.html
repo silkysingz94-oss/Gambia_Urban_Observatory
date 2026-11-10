@@ -205,10 +205,7 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
 <section class="hero">
   <h2>Gambia Urban Observatory</h2>
   <p>
-    Explore the spatial structure, population distribution, settlement patterns,
-    infrastructure and urban environmental indicators of The Gambia.
-    Navigate from administrative areas to wards and Enumeration Areas where
-    boundary data are available.
+    An interactive geospatial platform for exploring population distribution, settlement structure, urban growth patterns and spatial indicators across The Gambia. Load administrative boundaries, Enumeration Area GeoJSON and statistical tables, then compare geographic units through thematic mapping, indicator summaries, rankings and charts. Select an area on the map or use the administrative selector to focus the analysis. All calculations are based on the data currently loaded into the dashboard.
   </p>
 </section>
 
@@ -351,7 +348,7 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
     <div class="chartbox"><canvas id="indicatorChart"></canvas></div>
     <div class="section-title">Value frequency (histogram)</div>
     <div class="chartbox"><canvas id="histogramChart"></canvas></div>
-    <div class="section-title">Population and households</div>
+    <div class="section-title">Population and household totals (separate units)</div>
     <div class="chartbox"><canvas id="compositionChart"></canvas></div>
     <div class="section-title">Area size versus selected indicator</div>
     <div class="chartbox"><canvas id="scatterChart"></canvas></div>
@@ -828,9 +825,12 @@ function updateChart(features) {
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{x:{ticks:{font:{size:8},maxRotation:45,minRotation:30}},y:{beginAtZero:true,ticks:{precision:0,font:{size:9}}}}}});
   const pop=features.map(getPopulation).filter(v=>v!==null),hh=features.map(getHouseholds).filter(v=>v!==null);
-  makeChart("compositionChart",{type:"doughnut",data:{labels:["Population","Households"],
-    datasets:[{data:[sumValid(pop)||0,sumValid(hh)||0],backgroundColor:["#2c7bb6","#1a9641"],borderColor:"#fff",borderWidth:2}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{font:{size:9}}}}}});
+  makeChart("compositionChart",{type:"bar",data:{labels:["Population","Households"],
+    datasets:[{label:"Loaded totals (different units)",data:[sumValid(pop)||0,sumValid(hh)||0],
+      backgroundColor:["#2c7bb6","#1a9641"],borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:ctx=>ctx.label+": "+numberFormat(ctx.raw)}}},
+      scales:{x:{ticks:{font:{size:9}}},y:{beginAtZero:true,ticks:{font:{size:9}}}}}});
   const scatter=features.map(f=>({x:featureAreaKm2(f),y:indicatorValue(f)}))
     .filter(p=>p.x!==null&&p.y!==null&&Number.isFinite(p.x)&&Number.isFinite(p.y));
   makeChart("scatterChart",{type:"scatter",data:{datasets:[{label:indicatorLabel(),data:scatter,backgroundColor:"#d7191c",pointRadius:4}]},
