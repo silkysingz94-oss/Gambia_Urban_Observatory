@@ -598,7 +598,8 @@ async function autoLoadGithubAssets(manual=false){
         const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
         const res=await fetch(url);if(!res.ok)continue;const data=await res.json();
         if(data&&Array.isArray(data.features)&&data.features.length&&data.features.some(f=>f.geometry&&["Polygon","MultiPolygon"].includes(f.geometry.type))&&!boundaryLoaded){
-          prepareBoundaries(data);boundaryLoaded=true;$("levelSelect").value=/ea|enumeration|census/i.test(path)?"EA":"ADM2";
+          $("levelSelect").value=/ea|enumeration|census/i.test(path)?"EA":"ADM2";
+          prepareBoundaries(data);boundaryLoaded=true;
         }
       }catch(e){console.warn("Skipped GitHub JSON asset",path,e);}
     }
