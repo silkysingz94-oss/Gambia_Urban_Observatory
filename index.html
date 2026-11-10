@@ -16,9 +16,9 @@
   --navy2:#183b59;
   --blue:#2376c9;
   --cyan:#20b8c9;
-  --green:#25966c;
+  --green:#16834b;
   --gold:#e5a52e;
-  --bg:#f3f6fa;
+  --bg:#edf5ef;
   --panel:#ffffff;
   --text:#17283b;
   --muted:#748397;
@@ -108,15 +108,13 @@ select,input[type=text],input[type=file]{
 }
 .map-chip select{border:0;padding:0;width:auto;max-width:150px;font-weight:700}
 #map{position:absolute;inset:0}
-.map-legend{
-  position:absolute;z-index:5;bottom:25px;left:12px;
-  background:white;border:1px solid var(--border);border-radius:8px;
-  padding:11px 13px;box-shadow:var(--shadow);font-size:10px;
-  max-width:190px;
-}
-.legend-title{font-weight:800;margin-bottom:8px}
-.legend-item{display:flex;align-items:center;gap:7px;margin:5px 0;color:#52677b}
-.legend-swatch{width:12px;height:12px;border-radius:3px}
+.map-legend{position:absolute;z-index:5;bottom:25px;left:12px;background:rgba(255,255,255,.97);border:1px solid var(--border);border-radius:9px;padding:12px 13px;box-shadow:var(--shadow);font-size:10px;width:min(260px,calc(100% - 24px))}
+.legend-title{font-weight:800;margin-bottom:7px;color:var(--navy)}
+.legend-subtitle{font-size:9px;color:var(--muted);margin-bottom:7px}
+.legend-gradient{height:13px;border-radius:4px;border:1px solid #d8e0e7;background:linear-gradient(90deg,#d7191c 0%,#ffffff 25%,#2c7bb6 50%,#ffffff 75%,#1a9641 100%)}
+.legend-range{display:flex;justify-content:space-between;font-size:9px;color:#52677b;margin-top:5px}
+.legend-nodata{display:flex;align-items:center;gap:6px;margin-top:8px;color:#52677b}
+.legend-swatch{width:10px;height:10px;border-radius:2px;background:#e8a43a;display:inline-block}
 .map-credit{
   position:absolute;z-index:5;bottom:5px;right:8px;
   background:rgba(255,255,255,.85);padding:3px 6px;
@@ -316,11 +314,11 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
    </div>
  </div>
  <div class="map-legend">
-   <div class="legend-title">Map information</div>
-   <div class="legend-item"><span class="legend-swatch" style="background:#2585c5"></span> Selected area</div>
-   <div class="legend-item"><span class="legend-swatch" style="background:#9bc8e5"></span> Other boundaries</div>
-   <div class="legend-item"><span class="legend-swatch" style="background:#e8a43a"></span> No indicator data</div>
-   <div class="help">Map colours are indicative. They are not official classifications.</div>
+   <div class="legend-title" id="legendTitle">Continuous indicator scale</div>
+   <div class="legend-subtitle" id="legendSubtitle">Low values ← → High values</div>
+   <div class="legend-gradient"></div>
+   <div class="legend-range"><span id="legendMin">0</span><span id="legendMid">—</span><span id="legendMax">—</span></div>
+   <div class="legend-nodata"><span class="legend-swatch"></span> No data / unavailable</div>
  </div>
  <div class="map-credit">© OpenStreetMap contributors • © OpenFreeMap</div>
 </section>
@@ -349,8 +347,14 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
       <div class="kpi"><small>AVERAGE DENSITY</small><strong id="kpiDensity">—</strong><span>Persons / km²</span></div>
     </div>
 
-    <div class="section-title">Indicator distribution</div>
+    <div class="section-title">Indicator distribution · top areas</div>
     <div class="chartbox"><canvas id="indicatorChart"></canvas></div>
+    <div class="section-title">Value frequency (histogram)</div>
+    <div class="chartbox"><canvas id="histogramChart"></canvas></div>
+    <div class="section-title">Population and households</div>
+    <div class="chartbox"><canvas id="compositionChart"></canvas></div>
+    <div class="section-title">Area size versus selected indicator</div>
+    <div class="chartbox"><canvas id="scatterChart"></canvas></div>
 
     <div class="section-title">Selected administrative area</div>
     <div class="info-card">
@@ -422,7 +426,7 @@ let map;
 let boundaryData = null;
 let csvRows = [];
 let csvHeaders = [];
-let chart = null;
+let charts = {};
 let selectedFeatureId = null;
 let currentJoinField = "";
 let currentIndicator = "population";
@@ -789,6 +793,7 @@ function updateDashboard() {
   $("mapLayerName").textContent=indicatorLabel();
 
   updateChart(features);
+  updateLegend();
   updateRanking(features);
   updateTable(features);
   updateMapColors(features);
@@ -798,36 +803,48 @@ function renderEmpty() {
   $("kpiAreas").textContent="0";
   $("dataTable").innerHTML='<tr><td colspan="3">No data loaded</td></tr>';
   $("rankList").innerHTML="<li>No data loaded</li>";
-  if(chart){chart.destroy();chart=null;}
+  Object.values(charts).forEach(ch=>ch.destroy()); charts={};
+  updateLegend([]);
+}
+function makeChart(id,config) {
+  const canvas=$(id); if(!canvas||typeof Chart==="undefined")return;
+  if(charts[id])charts[id].destroy();
+  charts[id]=new Chart(canvas,config);
 }
 function updateChart(features) {
-  if (typeof Chart === "undefined") {
-    console.warn("Chart.js did not load; map and statistics remain available.");
-    return;
-  }
+  if(typeof Chart==="undefined")return;
   const vals=features.map(f=>({name:featureName(f),value:indicatorValue(f)}))
-    .filter(x=>x.value!==null).sort((a,b)=>b.value-a.value).slice(0,12);
-  if(chart)chart.destroy();
-  chart=new Chart($("indicatorChart"),{
-    type:"bar",
-    data:{
-      labels:vals.map(x=>x.name),
-      datasets:[{
-        label:indicatorLabel(),
-        data:vals.map(x=>x.value),
-        backgroundColor:"#3286bd",
-        borderRadius:4
-      }]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,indexAxis:"y",
-      plugins:{legend:{display:false}},
-      scales:{
-        x:{beginAtZero:true,ticks:{font:{size:9}}},
-        y:{ticks:{font:{size:9}}}
-      }
-    }
-  });
+    .filter(x=>x.value!==null&&Number.isFinite(x.value));
+  const sorted=[...vals].sort((a,b)=>b.value-a.value),top=sorted.slice(0,12);
+  makeChart("indicatorChart",{type:"bar",data:{labels:top.map(x=>x.name),
+    datasets:[{label:indicatorLabel(),data:top.map(x=>x.value),backgroundColor:"#2c7bb6",borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",plugins:{legend:{display:false}},
+      scales:{x:{beginAtZero:true,ticks:{font:{size:9}}},y:{ticks:{font:{size:9}}}}}});
+  const numbers=vals.map(x=>x.value),min=numbers.length?Math.min(...numbers):0,max=numbers.length?Math.max(...numbers):0;
+  const bins=8,counts=Array(bins).fill(0);
+  if(numbers.length){const span=max-min||1;numbers.forEach(v=>counts[Math.min(bins-1,Math.floor((v-min)/span*bins))]++);}
+  makeChart("histogramChart",{type:"bar",data:{labels:counts.map((_,i)=>numberFormat(min+(max-min)*i/bins)+"–"+numberFormat(min+(max-min)*(i+1)/bins)),
+    datasets:[{label:"Number of areas",data:counts,backgroundColor:"#1a9641",borderRadius:3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{font:{size:8},maxRotation:45,minRotation:30}},y:{beginAtZero:true,ticks:{precision:0,font:{size:9}}}}}});
+  const pop=features.map(getPopulation).filter(v=>v!==null),hh=features.map(getHouseholds).filter(v=>v!==null);
+  makeChart("compositionChart",{type:"doughnut",data:{labels:["Population","Households"],
+    datasets:[{data:[sumValid(pop)||0,sumValid(hh)||0],backgroundColor:["#2c7bb6","#1a9641"],borderColor:"#fff",borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{font:{size:9}}}}}});
+  const scatter=features.map(f=>({x:featureAreaKm2(f),y:indicatorValue(f)}))
+    .filter(p=>p.x!==null&&p.y!==null&&Number.isFinite(p.x)&&Number.isFinite(p.y));
+  makeChart("scatterChart",{type:"scatter",data:{datasets:[{label:indicatorLabel(),data:scatter,backgroundColor:"#d7191c",pointRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{title:{display:true,text:"Area (km²)"},beginAtZero:true,ticks:{font:{size:9}}},
+        y:{title:{display:true,text:indicatorLabel()},beginAtZero:true,ticks:{font:{size:9}}}}}});
+}
+function updateLegend() {
+  const vals=(boundaryData?.features||[]).map(indicatorValue).filter(v=>v!==null&&Number.isFinite(v));
+  const min=vals.length?Math.min(...vals):0,max=vals.length?Math.max(...vals):0;
+  $("legendTitle").textContent=indicatorLabel();
+  $("legendSubtitle").textContent="Continuous colour ramp · red → white → blue → white → green";
+  $("legendMin").textContent=numberFormat(min);$("legendMid").textContent=numberFormat((min+max)/2);
+  $("legendMax").textContent=numberFormat(max);
 }
 function updateRanking(features) {
   const sorted=features.map(f=>({name:featureName(f),value:indicatorValue(f)}))
@@ -841,25 +858,25 @@ function updateTable(features) {
     `<tr><td>${escapeHTML(featureName(f))}</td><td>${numberFormat(getPopulation(f))}</td><td>${numberFormat(getHouseholds(f))}</td></tr>`
   ).join("")||'<tr><td colspan="3">No data</td></tr>';
 }
+function rampColor(t) {
+  const stops=[{p:0,c:[215,25,28]},{p:.25,c:[255,255,255]},{p:.5,c:[44,123,182]},
+    {p:.75,c:[255,255,255]},{p:1,c:[26,150,65]}];
+  t=Math.max(0,Math.min(1,t));let a=stops[0],b=stops[stops.length-1];
+  for(let i=0;i<stops.length-1;i++)if(t>=stops[i].p&&t<=stops[i+1].p){a=stops[i];b=stops[i+1];break;}
+  const q=(t-a.p)/(b.p-a.p||1),rgb=a.c.map((v,i)=>Math.round(v+(b.c[i]-v)*q));
+  return "rgb("+rgb.join(",")+")";
+}
 function updateMapColors(features) {
   if(!boundaryData)return;
-  const vals=boundaryData.features.map(indicatorValue)
-    .filter(v=>v!==null && Number.isFinite(v) && v>=0);
-  const max=Math.max(...vals,0);
-
+  const vals=boundaryData.features.map(indicatorValue).filter(v=>v!==null&&Number.isFinite(v));
+  const min=vals.length?Math.min(...vals):0,max=vals.length?Math.max(...vals):0;
   boundaryData.features.forEach(f=>{
-    const v=indicatorValue(f);
-    const valid=v!==null && Number.isFinite(v) && v>=0;
-    f.properties.__mapColor=!valid?"#e8a43a":
-      max===0?"#9bc8e5":
-      v/max>.75?"#155b91":
-      v/max>.5?"#3685b8":
-      v/max>.25?"#7bb5d7":"#c6e0ef";
-    // Relative display height, not physical elevation or building height.
-    f.properties.__3dHeight=valid && max>0 ? 1200*(v/max) : 0;
+    const v=indicatorValue(f),valid=v!==null&&Number.isFinite(v);
+    const t=valid&&max>min?(v-min)/(max-min):0.5;
+    f.properties.__mapColor=valid?rampColor(t):"#e8a43a";
+    f.properties.__3dHeight=valid&&max>0?1200*(v/max):0;
   });
-  updateBoundarySource();
-  toggle3D();
+  updateBoundarySource();toggle3D();
 }
 function selectFeature(id) {
   selectedFeatureId=String(id);
