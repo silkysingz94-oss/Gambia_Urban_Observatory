@@ -592,10 +592,10 @@ async function loadBoundaries() {
 async function readCSVAsset(path,url){
   const response=await fetch(url);
   if(!response.ok)throw new Error("HTTP "+response.status+" while downloading "+path);
-  if(/\\.zip$/i.test(path)){
+  if(/\.zip$/i.test(path)){
     if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
     const archive=await JSZip.loadAsync(await response.arrayBuffer());
-    const entries=Object.values(archive.files).filter(f=>!f.dir&&/\\.csv$/i.test(f.name));
+    const entries=Object.values(archive.files).filter(f=>!f.dir&&/\.csv$/i.test(f.name));
     if(!entries.length)throw new Error("No CSV file was found inside "+path);
     entries.sort((a,b)=>{
       const score=n=>(/population/i.test(n)?100:0)+(/census|household|indicator|data/i.test(n)?20:0);
@@ -636,9 +636,9 @@ async function autoLoadGithubAssets(manual=false){
     const response=await fetch(api,{headers:{"Accept":"application/vnd.github+json"}});
     if(!response.ok)throw new Error("GitHub API HTTP "+response.status);
     const tree=await response.json(),paths=(tree.tree||[]).filter(x=>x.type==="blob").map(x=>x.path);
-    const geo=paths.filter(p=>/\\.(geojson|json)$/i.test(p)&&!/package(-lock)?\\.json$/i.test(p)&&!/\\.github\\//i.test(p));
-    const csv=paths.filter(p=>/\\.csv$/i.test(p));
-    const zip=paths.filter(p=>/\\.zip$/i.test(p)&&/population/i.test(p));
+    const geo=paths.filter(p=>/\.(geojson|json)$/i.test(p)&&!/package(-lock)?\.json$/i.test(p)&&!/\.github\\//i.test(p));
+    const csv=paths.filter(p=>/\.csv$/i.test(p));
+    const zip=paths.filter(p=>/\.zip$/i.test(p)&&/population/i.test(p));
     const stats=csv.concat(zip);
     githubAssetPaths=geo.concat(stats);
     if(!geo.length&&!stats.length){status.textContent="No GeoJSON, CSV or population ZIP assets found in this repository.";return false;}
@@ -656,7 +656,7 @@ async function autoLoadGithubAssets(manual=false){
     }
     // Prefer population.zip over any loose CSV files; read its best-matching CSV member.
     const orderedStats=stats.slice().sort((a,b)=>{
-      const score=p=>(/population\\.zip$/i.test(p)?200:0)+(/population/i.test(p)?100:0)+(/\\.zip$/i.test(p)?20:0);
+      const score=p=>(/population\.zip$/i.test(p)?200:0)+(/population/i.test(p)?100:0)+(/\.zip$/i.test(p)?20:0);
       return score(b)-score(a);
     });
     for(const path of orderedStats){
@@ -808,10 +808,10 @@ $("csvFile").addEventListener("change",async e=>{
   const file=e.target.files[0];if(!file)return;
   try {
     let parsed,source=file.name;
-    if(/\\.zip$/i.test(file.name)){
+    if(/\.zip$/i.test(file.name)){
       if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
       const archive=await JSZip.loadAsync(await file.arrayBuffer());
-      const entries=Object.values(archive.files).filter(f=>!f.dir&&/\\.csv$/i.test(f.name));
+      const entries=Object.values(archive.files).filter(f=>!f.dir&&/\.csv$/i.test(f.name));
       if(!entries.length)throw new Error("No CSV file found inside the ZIP archive.");
       entries.sort((a,b)=>(/population/i.test(b.name)?1:0)-(/population/i.test(a.name)?1:0));
       parsed=parseCSV(await entries[0].async("text"));source+=" → "+entries[0].name;
