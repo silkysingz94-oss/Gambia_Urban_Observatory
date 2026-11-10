@@ -692,7 +692,35 @@ function populateAreaSelect(){
 
 function featureName(f) {
   const p=propertiesOf(f);
-  return p.shapeName||p.name||p.NAME_1||p.NAME_2||p.admin||p.DISTRICT||p.WARD||p.EA_NAME||p.FEACODE||"Unnamed area";
+  // Resolve names case-insensitively and tolerate common census/admin field variants.
+  const normaliseKey=k=>String(k).toLowerCase().replace(/[^a-z0-9]/g,"");
+  const lookup={};
+  Object.keys(p).forEach(k=>{lookup[normaliseKey(k)]=p[k];});
+  const candidates=[
+    "shapeName","shape_name","area_name","areaname","name","NAME",
+    "eaname","ea_name","enumeration_area","enumeration_area_name",
+    "feacode","FEACODE","ea_code","ea",
+    "settlement_name","settlement","hsettlement",
+    "wardname","ward_name","ward","WARD",
+    "distname","district_name","district","DISTRICT",
+    "lganame","lga_name","lga","admin3Name","admin2Name","admin1Name",
+    "NAME_3","NAME_2","NAME_1","admin"
+  ];
+  for(const key of candidates){
+    const value=lookup[normaliseKey(key)];
+    if(value!==undefined&&value!==null&&String(value).trim()!==""){
+      const label=String(value).trim();
+      if(!/^(null|undefined|nan)$/i.test(label)) return label;
+    }
+  }
+  const id=p.__obs_id!==undefined?String(p.__obs_id):"";
+  const codeCandidates=["objectid","fid","id","ogc_fid","code","area_code"];
+  for(const key of codeCandidates){
+    const value=lookup[normaliseKey(key)];
+    if(value!==undefined&&value!==null&&String(value).trim()!=="")
+      return "Area ID "+String(value).trim();
+  }
+  return id!==""?"Area "+(Number.isFinite(Number(id))?Number(id)+1:id):"Area";
 }
 
 function populatePropertyFields() {
