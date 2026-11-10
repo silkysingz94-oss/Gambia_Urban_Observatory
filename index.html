@@ -227,12 +227,23 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
   </div>
   <button class="btn full" onclick="loadBoundaries()">Load boundaries</button>
   <div class="control" style="margin-top:10px">
+    <label>District selector</label><select id="districtSelect"><option value="all">All districts</option></select>
+    <div class="help">Filter loaded district or EA boundaries by district name.</div>
+  </div>
+  <div class="control">
+    <label>Administrative area / individual feature</label>
     <label>Administrative area</label>
     <select id="areaSelect">
       <option value="all">All areas</option>
     </select>
   </div>
 
+  <div class="section-title">GPS location</div>
+  <button class="btn dark full" onclick="locateUser()"><i class="fa-solid fa-location-crosshairs"></i> Use my current GPS location</button>
+  <div id="gpsStatus" class="help">Location is off until you grant browser permission. Used only to centre this map.</div>
+  <div class="section-title">GitHub data connection</div>
+  <div id="githubAssetStatus" class="help">Searching the project repository for GeoJSON and CSV data files on startup…</div>
+  <button class="btn secondary full" onclick="autoLoadGithubAssets(true)"><i class="fa-brands fa-github"></i> Scan GitHub data files</button>
   <div class="section-title">Your GBoS spatial data</div>
   <div class="control">
     <label>Upload EA / administrative GeoJSON</label>
@@ -424,6 +435,8 @@ let boundaryData = null;
 let csvRows = [];
 let csvHeaders = [];
 let charts = {};
+let userGpsMarker = null;
+let githubAssetPaths = [];
 let selectedFeatureId = null;
 let currentJoinField = "";
 let currentIndicator = "population";
@@ -448,28 +461,16 @@ function numeric(v) {
 function propertiesOf(f) { return f && f.properties ? f.properties : {}; }
 
 function initMap() {
-  map = new maplibregl.Map({
-    container:"map",
-    style:STYLES.liberty,
-    center:GAMBIA_CENTER,
-    zoom:7.1,
-    pitch:48,
-    bearing:-8,
-    maxPitch:75,
-    attributionControl:true
-  });
-
+  map = new maplibregl.Map({container:"map",style:STYLES.liberty,center:GAMBIA_CENTER,zoom:7.1,pitch:48,bearing:-8,maxPitch:75,attributionControl:true});
   map.addControl(new maplibregl.NavigationControl({visualizePitch:true}),"top-right");
   map.addControl(new maplibregl.ScaleControl({unit:"metric"}),"bottom-right");
-  map.on("load",()=>{
+  map.on("load",async()=>{
     $("connectionStatus").textContent="Map connected";
-    add3DBuildings();
-    addBoundaryLayers();
-    loadBoundaries();
+    add3DBuildings();addBoundaryLayers();
+    const loaded=await autoLoadGithubAssets(false);
+    if(!loaded)await loadBoundaries();
   });
-  map.on("error",e=>{
-    console.warn("Map service message:",e.error || e);
-  });
+  map.on("error",e=>console.warn("Map service message:",e.error||e));
 }
 
 function add3DBuildings() {
@@ -567,27 +568,73 @@ function addBoundaryLayers() {
 
 async function loadBoundaries() {
   const level=$("levelSelect").value;
-  if(level==="EA") {
-    if(!boundaryData) message("Upload an EA GeoJSON file to load Enumeration Areas.");
-    return;
-  }
-  const url=`https://www.geoboundaries.org/api/current/gbOpen/GMB/${level}/`;
-  message("Loading Gambia administrative boundaries...");
-  try {
-    const response=await fetch(url);
-    if(!response.ok) throw new Error("Boundary service returned HTTP "+response.status);
-    const meta=await response.json();
-    const geoURL = meta.gjDownloadURL;
-    if(!geoURL) throw new Error("No GeoJSON download URL was returned.");
-    const geoResponse=await fetch(geoURL);
-    if(!geoResponse.ok) throw new Error("GeoJSON download failed.");
-    const geo=await geoResponse.json();
-    prepareBoundaries(geo);
-    message(`Loaded ${boundaryData.features.length} administrative features (${level}).`);
-  } catch(err) {
-    console.error(err);
-    message("Could not load boundaries automatically. Check your internet connection or upload a GeoJSON file. "+err.message);
-  }
+  if(level==="EA"){if(!boundaryData)message("No EA GeoJSON found. Add one to GitHub or upload it.");return;}
+  const url="https://www.geoboundaries.org/api/current/gbOpen/GMB/"+level+"/";
+  message("Loading Gambia administrative boundaries…");
+  try{
+    const response=await fetch(url);if(!response.ok)throw new Error("Boundary service HTTP "+response.status);
+    const meta=await response.json();if(!meta.gjDownloadURL)throw new Error("No GeoJSON URL returned.");
+    const geoResponse=await fetch(meta.gjDownloadURL);if(!geoResponse.ok)throw new Error("GeoJSON download failed.");
+    prepareBoundaries(await geoResponse.json());
+    message("Loaded "+boundaryData.features.length+" administrative features ("+level+").");
+  }catch(err){console.error(err);message("Could not load boundaries: "+err.message);}
+}
+
+/* Discover public GeoJSON/JSON and CSV assets committed to this repository. */
+async function autoLoadGithubAssets(manual=false){
+  const status=$("githubAssetStatus");if(manual)status.textContent="Scanning GitHub repository…";
+  try{
+    const api="https://api.github.com/repos/silkysingz94-oss/Gambia_Urban_Observatory/git/trees/main?recursive=1";
+    const response=await fetch(api,{headers:{"Accept":"application/vnd.github+json"}});
+    if(!response.ok)throw new Error("GitHub API HTTP "+response.status);
+    const tree=await response.json(),paths=(tree.tree||[]).filter(x=>x.type==="blob").map(x=>x.path);
+    const geo=paths.filter(p=>/\.(geojson|json)$/i.test(p)&&!/package(-lock)?\.json$/i.test(p)&&!/\.github\//i.test(p));
+    const csv=paths.filter(p=>/\.csv$/i.test(p));githubAssetPaths=geo.concat(csv);
+    if(!githubAssetPaths.length){status.textContent="No GeoJSON/JSON or CSV assets found in this repository; using public administrative boundaries.";return false;}
+    const score=p=>{const s=p.toLowerCase();return (/census.*ea|ea.*census|enumeration|gambiaea|census_eas/.test(s)?100:0)+(/boundary|admin|district|ward|geojson/.test(s)?25:0)-(/sample|metadata|style|config|package|readme/.test(s)?80:0);};
+    let boundaryLoaded=false,csvLoaded=0;
+    for(const path of geo.slice().sort((a,b)=>score(b)-score(a))){
+      try{
+        const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
+        const res=await fetch(url);if(!res.ok)continue;const data=await res.json();
+        if(data&&Array.isArray(data.features)&&data.features.length&&data.features.some(f=>f.geometry&&["Polygon","MultiPolygon"].includes(f.geometry.type))&&!boundaryLoaded){
+          prepareBoundaries(data);boundaryLoaded=true;$("levelSelect").value=/ea|enumeration|census/i.test(path)?"EA":"ADM2";
+        }
+      }catch(e){console.warn("Skipped GitHub JSON asset",path,e);}
+    }
+    for(const path of csv){
+      try{
+        const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
+        const res=await fetch(url);if(!res.ok)continue;const parsed=parseCSV(await res.text());if(!parsed.rows.length)continue;
+        csvHeaders=parsed.headers;csvRows=parsed.rows;fillSelect("joinCsvField",csvHeaders);csvLoaded++;
+        if(boundaryData){
+          const bkeys=[...new Set(boundaryData.features.flatMap(f=>Object.keys(propertiesOf(f))))];
+          const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+          const key=csvHeaders.find(k=>bkeys.some(b=>norm(b)===norm(k)));
+          if(key){$("joinBoundaryField").value=bkeys.find(b=>norm(b)===norm(key));$("joinCsvField").value=key;joinCSV();}
+        }
+      }catch(e){console.warn("Skipped GitHub CSV asset",path,e);}
+    }
+    status.textContent="Repository scan: "+geo.length+" JSON/GeoJSON candidate(s), "+csv.length+" CSV file(s); "+(boundaryLoaded?"boundary loaded":"no polygon boundary found")+"; "+csvLoaded+" CSV file(s) read.";
+    if(boundaryLoaded){message("Loaded a boundary dataset from GitHub. Check source, year and fields before analysis.");return true;}
+    return false;
+  }catch(err){console.warn(err);status.textContent="GitHub scan unavailable: "+err.message+". Falling back to public boundaries.";return false;}
+}
+
+function locateUser(){
+  const out=$("gpsStatus");
+  if(!navigator.geolocation){out.textContent="Browser geolocation is not supported.";return;}
+  out.textContent="Requesting your location permission…";
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const lat=pos.coords.latitude,lon=pos.coords.longitude,acc=pos.coords.accuracy;
+    if(userGpsMarker)userGpsMarker.remove();
+    const el=document.createElement("div");
+    el.style.cssText="width:17px;height:17px;border:3px solid white;border-radius:50%;background:#1677d2;box-shadow:0 0 0 7px rgba(22,119,210,.22)";
+    userGpsMarker=new maplibregl.Marker({element:el}).setLngLat([lon,lat])
+      .setPopup(new maplibregl.Popup({offset:18}).setHTML("<b>Current GPS position</b><br>Lat: "+lat.toFixed(6)+"<br>Lon: "+lon.toFixed(6)+"<br>Accuracy: "+Math.round(acc)+" m")).addTo(map);
+    map.flyTo({center:[lon,lat],zoom:Math.max(map.getZoom(),14),pitch:35});
+    out.textContent="GPS: "+lat.toFixed(5)+", "+lon.toFixed(5)+" · accuracy ±"+Math.round(acc)+" m. Not uploaded or stored by this dashboard.";
+  },err=>{out.textContent=({1:"Permission denied. Allow location access in browser settings.",2:"Current position unavailable.",3:"GPS request timed out."})[err.code]||"Unable to obtain GPS position.";},{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
 }
 
 function prepareBoundaries(geo) {
@@ -620,21 +667,19 @@ function fitBoundary() {
   } catch(e) { console.warn(e); }
 }
 
-function populateAreaSelect() {
-  const select=$("areaSelect");
-  select.innerHTML='<option value="all">All areas</option>';
-  (boundaryData?.features||[]).forEach(f=>{
-    const p=propertiesOf(f);
-    const name=featureName(f);
-    const opt=document.createElement("option");
-    opt.value=p.__obs_id;
-    opt.textContent=name;
-    select.appendChild(opt);
-  });
-  select.onchange=()=>{
-    if(select.value==="all"){selectedFeatureId=null;clearSelection();updateDashboard();}
-    else selectFeature(select.value);
-  };
+function districtValue(f){
+  const p=propertiesOf(f),keys=["distname","district","district_name","DISTRICT","DIST_NAME","admin2Name","shapeName"];
+  for(const k of keys)if(p[k]!==undefined&&String(p[k]).trim())return String(p[k]).trim();
+  return $("levelSelect").value==="ADM2"?featureName(f):"";
+}
+function populateAreaSelect(){
+  const select=$("areaSelect");select.innerHTML='<option value="all">All areas</option>';
+  (boundaryData?.features||[]).forEach(f=>{const o=document.createElement("option");o.value=propertiesOf(f).__obs_id;o.textContent=featureName(f);select.appendChild(o);});
+  select.onchange=()=>{if(select.value==="all"){selectedFeatureId=null;clearSelection();updateDashboard();}else selectFeature(select.value);};
+  const district=$("districtSelect"),names=[...new Set((boundaryData?.features||[]).map(districtValue).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  district.innerHTML='<option value="all">All districts</option>';
+  names.forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;district.appendChild(o);});
+  district.onchange=()=>{selectedFeatureId=null;$("areaSelect").value="all";clearSelection();updateDashboard();};
 }
 
 function featureName(f) {
@@ -764,10 +809,10 @@ function indicatorLabel() {
     road:"Road density (km/km²)"
   })[$("indicatorSelect").value];
 }
-function activeFeatures() {
+function activeFeatures(){
   if(!boundaryData)return [];
-  const id=$("areaSelect").value;
-  return boundaryData.features.filter(f=>id==="all"||propertiesOf(f).__obs_id===id);
+  const id=$("areaSelect").value,district=$("districtSelect").value;
+  return boundaryData.features.filter(f=>(id==="all"||propertiesOf(f).__obs_id===id)&&(district==="all"||districtValue(f)===district));
 }
 function sumValid(values) {
   const valid=values.filter(v=>v!==null&&Number.isFinite(v));
@@ -881,6 +926,8 @@ function updateMapColors(features) {
 function selectFeature(id) {
   selectedFeatureId=String(id);
   $("areaSelect").value=selectedFeatureId;
+  const picked=boundaryData.features.find(x=>String(propertiesOf(x).__obs_id)===selectedFeatureId),d=picked?districtValue(picked):"";
+  if(d&&[...$("districtSelect").options].some(o=>o.value===d))$("districtSelect").value=d;
   const f=boundaryData.features.find(x=>String(propertiesOf(x).__obs_id)===selectedFeatureId);
   if(!f)return;
   if(selectedFeatureId!==null){
@@ -986,6 +1033,7 @@ function downloadFile(content,name,type) {
 }
 function resetDashboard() {
   $("areaSelect").value="all";
+  $("districtSelect").value="all";
   $("indicatorSelect").value="population";
   $("basemapSelect").value="liberty";
   $("mapStyleQuick").value="liberty";
