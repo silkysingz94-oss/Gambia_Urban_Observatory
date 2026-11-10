@@ -463,6 +463,7 @@ function initMap() {
     $("connectionStatus").textContent="Map connected";
     add3DBuildings();
     addBoundaryLayers();
+    loadBoundaries();
   });
   map.on("error",e=>{
     console.warn("Map service message:",e.error || e);
@@ -554,7 +555,7 @@ async function loadBoundaries() {
     const response=await fetch(url);
     if(!response.ok) throw new Error("Boundary service returned HTTP "+response.status);
     const meta=await response.json();
-    const geoURL=meta gjDownloadURL || meta.gjDownloadURL;
+    const geoURL = meta.gjDownloadURL;
     if(!geoURL) throw new Error("No GeoJSON download URL was returned.");
     const geoResponse=await fetch(geoURL);
     if(!geoResponse.ok) throw new Error("GeoJSON download failed.");
@@ -779,6 +780,10 @@ function renderEmpty() {
   if(chart){chart.destroy();chart=null;}
 }
 function updateChart(features) {
+  if (typeof Chart === "undefined") {
+    console.warn("Chart.js did not load; map and statistics remain available.");
+    return;
+  }
   const vals=features.map(f=>({name:featureName(f),value:indicatorValue(f)}))
     .filter(x=>x.value!==null).sort((a,b)=>b.value-a.value).slice(0,12);
   if(chart)chart.destroy();
