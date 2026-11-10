@@ -639,6 +639,8 @@ async function autoLoadGithubAssets(manual=false){
     const geo=paths.filter(p=>/\.(geojson|json)$/i.test(p)&&!/package(-lock)?\.json$/i.test(p)&&!/\.github\//i.test(p));
     const csv=paths.filter(p=>/\.csv$/i.test(p));
     const zip=paths.filter(p=>/\.zip$/i.test(p)&&/population/i.test(p));
+    // Explicit repository path: preserve the exact capitalisation used by GitHub (Population.zip).
+    if(!zip.some(p=>p.toLowerCase()==="population.zip"))zip.unshift("Population.zip");
     const stats=csv.concat(zip);
     githubAssetPaths=geo.concat(stats);
     if(!geo.length&&!stats.length){status.textContent="No GeoJSON, CSV or population ZIP assets found in this repository.";return false;}
