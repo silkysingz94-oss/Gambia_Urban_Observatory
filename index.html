@@ -111,8 +111,14 @@ select,input[type=text],input[type=file]{
 .map-legend{position:absolute;z-index:5;bottom:25px;left:12px;background:rgba(255,255,255,.97);border:1px solid var(--border);border-radius:9px;padding:12px 13px;box-shadow:var(--shadow);font-size:10px;width:min(260px,calc(100% - 24px))}
 .legend-title{font-weight:800;margin-bottom:7px;color:var(--navy)}
 .legend-subtitle{font-size:9px;color:var(--muted);margin-bottom:7px}
-.legend-gradient{height:13px;border-radius:4px;border:1px solid #d8e0e7;background:linear-gradient(90deg,#d7191c 0%,#ffffff 25%,#2c7bb6 50%,#ffffff 75%,#1a9641 100%)}
-.legend-range{display:flex;justify-content:space-between;font-size:9px;color:#52677b;margin-top:5px}
+.legend-gradient{height:17px;border-radius:5px;border:1px solid rgba(35,55,75,.22);background:linear-gradient(90deg,#d7191c 0%,#ffffff 25%,#2c7bb6 50%,#ffffff 75%,#1a9641 100%);box-shadow:inset 0 0 2px rgba(0,0,0,.12)}
+.legend-range{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));font-size:9px;color:#52677b;margin-top:5px;gap:2px}
+.legend-range span{text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
+.legend-range span:first-child{text-align:left}
+.legend-range span:last-child{text-align:right}
+.legend-ticks{height:5px;display:grid;grid-template-columns:repeat(5,1fr);margin:0 1px}
+.legend-ticks i{display:block;width:1px;height:5px;background:#607184;justify-self:center}
+.legend-ticks i:first-child{justify-self:start}.legend-ticks i:last-child{justify-self:end}
 .legend-nodata{display:flex;align-items:center;gap:6px;margin-top:8px;color:#52677b}
 .legend-swatch{width:10px;height:10px;border-radius:2px;background:#e8a43a;display:inline-block}
 .map-credit{
@@ -324,8 +330,9 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
  <div class="map-legend">
    <div class="legend-title" id="legendTitle">Continuous indicator scale</div>
    <div class="legend-subtitle" id="legendSubtitle">Low values ← → High values</div>
-   <div class="legend-gradient"></div>
-   <div class="legend-range"><span id="legendMin">0</span><span id="legendMid">—</span><span id="legendMax">—</span></div>
+   <div class="legend-gradient" role="img" aria-label="Continuous red to white to blue to white to green indicator colour ramp"></div>
+   <div class="legend-ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+   <div class="legend-range"><span id="legendMin">0</span><span id="legendQ1">—</span><span id="legendMid">—</span><span id="legendQ3">—</span><span id="legendMax">—</span></div>
    <div class="legend-nodata"><span class="legend-swatch"></span> No data / unavailable</div>
  </div>
  <div class="map-credit">© OpenStreetMap contributors • © OpenFreeMap</div>
@@ -887,9 +894,13 @@ function updateChart(features) {
 function updateLegend() {
   const vals=(boundaryData?.features||[]).map(indicatorValue).filter(v=>v!==null&&Number.isFinite(v));
   const min=vals.length?Math.min(...vals):0,max=vals.length?Math.max(...vals):0;
+  const span=max-min;
   $("legendTitle").textContent=indicatorLabel();
-  $("legendSubtitle").textContent="Continuous colour ramp · red → white → blue → white → green";
-  $("legendMin").textContent=numberFormat(min);$("legendMid").textContent=numberFormat((min+max)/2);
+  $("legendSubtitle").textContent="Continuous indicator scale · low values → high values";
+  $("legendMin").textContent=numberFormat(min);
+  $("legendQ1").textContent=numberFormat(min+span*.25);
+  $("legendMid").textContent=numberFormat(min+span*.50);
+  $("legendQ3").textContent=numberFormat(min+span*.75);
   $("legendMax").textContent=numberFormat(max);
 }
 function updateRanking(features) {
