@@ -531,6 +531,12 @@ function addBoundaryLayers() {
         "fill-extrusion-vertical-gradient":true
       }
     });
+    map.on("click","admin-extrusion",e=>{
+      if(!e.features || !e.features.length)return;
+      selectFeature(e.features[0].properties.__obs_id);
+    });
+    map.on("mouseenter","admin-extrusion",()=>map.getCanvas().style.cursor="pointer");
+    map.on("mouseleave","admin-extrusion",()=>map.getCanvas().style.cursor="");
     map.addLayer({
       id:"admin-outline",type:"line",source:"admin-boundaries",
       paint:{"line-color":"#23618d","line-width":1.2}
@@ -909,7 +915,7 @@ function toggleBuildings() {
   map.setLayoutProperty("3d-buildings","visibility",$("buildingCheck").checked?"visible":"none");
 }
 function toggleBoundaries() {
-  ["admin-fill","admin-outline"].forEach(id=>{
+  ["admin-fill","admin-extrusion","admin-outline"].forEach(id=>{
     if(map.getLayer(id))map.setLayoutProperty(id,"visibility",$("boundaryCheck").checked?"visible":"none");
   });
 }
