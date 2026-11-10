@@ -190,6 +190,7 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
  .right-panel{min-height:600px}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 
 <body>
@@ -258,8 +259,8 @@ th{background:#f4f7fa;color:#617286;position:sticky;top:0}
   </div>
   <div class="control">
     <label>Upload population / indicator CSV</label>
-    <input type="file" id="csvFile" accept=".csv">
-    <div class="help">CSV can contain EA codes, district names, population, households and other indicators.</div>
+    <input type="file" id="csvFile" accept=".csv,.zip">
+    <div class="help">Upload a CSV or ZIP archive containing the population CSV. ZIP files are extracted in the browser.</div>
   </div>
   <div class="control">
     <label>Join key in boundary data</label>
@@ -587,7 +588,47 @@ async function loadBoundaries() {
   }catch(err){console.error(err);message("Could not load boundaries: "+err.message);}
 }
 
-/* Discover public GeoJSON/JSON and CSV assets committed to this repository. */
+/* Read a CSV from plain text or from a ZIP archive. */
+async function readCSVAsset(path,url){
+  const response=await fetch(url);
+  if(!response.ok)throw new Error("HTTP "+response.status+" while downloading "+path);
+  if(/\\.zip$/i.test(path)){
+    if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
+    const archive=await JSZip.loadAsync(await response.arrayBuffer());
+    const entries=Object.values(archive.files).filter(f=>!f.dir&&/\\.csv$/i.test(f.name));
+    if(!entries.length)throw new Error("No CSV file was found inside "+path);
+    entries.sort((a,b)=>{
+      const score=n=>(/population/i.test(n)?100:0)+(/census|household|indicator|data/i.test(n)?20:0);
+      return score(b.name)-score(a.name)||a.name.localeCompare(b.name);
+    });
+    for(const entry of entries){
+      const text=await entry.async("text");
+      const parsed=parseCSV(text);
+      if(parsed.rows.length)return {parsed,source:path+" → "+entry.name};
+    }
+    throw new Error("CSV files inside "+path+" contained no records.");
+  }
+  const parsed=parseCSV(await response.text());
+  if(!parsed.rows.length)throw new Error("CSV contains no records: "+path);
+  return {parsed,source:path};
+}
+function applyRepositoryCSV(parsed,source){
+  csvHeaders=parsed.headers;csvRows=parsed.rows;
+  fillSelect("joinCsvField",csvHeaders);
+  if(boundaryData){
+    const bkeys=[...new Set(boundaryData.features.flatMap(f=>Object.keys(propertiesOf(f))))];
+    const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+    const key=csvHeaders.find(k=>bkeys.some(b=>norm(b)===norm(k)));
+    if(key){
+      $("joinBoundaryField").value=bkeys.find(b=>norm(b)===norm(key));
+      $("joinCsvField").value=key;
+      joinCSV();
+    }
+  }
+  return source;
+}
+
+/* Discover public GeoJSON/JSON boundaries and CSV/ZIP statistical assets in this repository. */
 async function autoLoadGithubAssets(manual=false){
   const status=$("githubAssetStatus");if(manual)status.textContent="Scanning GitHub repository…";
   try{
@@ -595,11 +636,14 @@ async function autoLoadGithubAssets(manual=false){
     const response=await fetch(api,{headers:{"Accept":"application/vnd.github+json"}});
     if(!response.ok)throw new Error("GitHub API HTTP "+response.status);
     const tree=await response.json(),paths=(tree.tree||[]).filter(x=>x.type==="blob").map(x=>x.path);
-    const geo=paths.filter(p=>/\.(geojson|json)$/i.test(p)&&!/package(-lock)?\.json$/i.test(p)&&!/\.github\//i.test(p));
-    const csv=paths.filter(p=>/\.csv$/i.test(p));githubAssetPaths=geo.concat(csv);
-    if(!githubAssetPaths.length){status.textContent="No GeoJSON/JSON or CSV assets found in this repository; using public administrative boundaries.";return false;}
-    const score=p=>{const s=p.toLowerCase();return (/census.*ea|ea.*census|enumeration|gambiaea|census_eas/.test(s)?100:0)+(/boundary|admin|district|ward|geojson/.test(s)?25:0)-(/sample|metadata|style|config|package|readme/.test(s)?80:0);};
-    let boundaryLoaded=false,csvLoaded=0;
+    const geo=paths.filter(p=>/\\.(geojson|json)$/i.test(p)&&!/package(-lock)?\\.json$/i.test(p)&&!/\\.github\\//i.test(p));
+    const csv=paths.filter(p=>/\\.csv$/i.test(p));
+    const zip=paths.filter(p=>/\\.zip$/i.test(p)&&/population/i.test(p));
+    const stats=csv.concat(zip);
+    githubAssetPaths=geo.concat(stats);
+    if(!geo.length&&!stats.length){status.textContent="No GeoJSON, CSV or population ZIP assets found in this repository.";return false;}
+    const score=p=>{const v=p.toLowerCase();return (/census.*ea|ea.*census|enumeration|gambiaea|census_eas/.test(v)?100:0)+(/boundary|admin|district|ward|geojson/.test(v)?25:0)-(/sample|metadata|style|config|package|readme/.test(v)?80:0);};
+    let boundaryLoaded=false,csvLoaded=0,loadedCSVNames=[];
     for(const path of geo.slice().sort((a,b)=>score(b)-score(a))){
       try{
         const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
@@ -610,25 +654,26 @@ async function autoLoadGithubAssets(manual=false){
         }
       }catch(e){console.warn("Skipped GitHub JSON asset",path,e);}
     }
-    for(const path of csv){
+    // Prefer population.zip over any loose CSV files; read its best-matching CSV member.
+    const orderedStats=stats.slice().sort((a,b)=>{
+      const score=p=>(/population\\.zip$/i.test(p)?200:0)+(/population/i.test(p)?100:0)+(/\\.zip$/i.test(p)?20:0);
+      return score(b)-score(a);
+    });
+    for(const path of orderedStats){
       try{
         const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
-        const res=await fetch(url);if(!res.ok)continue;const parsed=parseCSV(await res.text());if(!parsed.rows.length)continue;
-        csvHeaders=parsed.headers;csvRows=parsed.rows;fillSelect("joinCsvField",csvHeaders);csvLoaded++;
-        if(boundaryData){
-          const bkeys=[...new Set(boundaryData.features.flatMap(f=>Object.keys(propertiesOf(f))))];
-          const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
-          const key=csvHeaders.find(k=>bkeys.some(b=>norm(b)===norm(k)));
-          if(key){$("joinBoundaryField").value=bkeys.find(b=>norm(b)===norm(key));$("joinCsvField").value=key;joinCSV();}
-        }
-      }catch(e){console.warn("Skipped GitHub CSV asset",path,e);}
+        const result=await readCSVAsset(path,url);
+        applyRepositoryCSV(result.parsed,result.source);
+        csvLoaded++;loadedCSVNames.push(result.source);
+        // The population archive is the primary population table; avoid overwriting it with other CSVs.
+        if(/population/i.test(path))break;
+      }catch(e){console.warn("Skipped GitHub statistical asset",path,e);}
     }
-    status.textContent="Repository scan: "+geo.length+" JSON/GeoJSON candidate(s), "+csv.length+" CSV file(s); "+(boundaryLoaded?"boundary loaded":"no polygon boundary found")+"; "+csvLoaded+" CSV file(s) read.";
-    if(boundaryLoaded){message("Loaded a boundary dataset from GitHub. Check source, year and fields before analysis.");return true;}
+    status.textContent="Repository scan: "+geo.length+" boundary JSON candidate(s), "+csv.length+" loose CSV file(s), "+zip.length+" population ZIP file(s); "+(boundaryLoaded?"boundary loaded":"no polygon boundary found")+"; "+csvLoaded+" statistical table(s) loaded"+(loadedCSVNames.length?" ("+loadedCSVNames.join("; ")+")":"")+".";
+    if(boundaryLoaded){message(csvLoaded?"Loaded GitHub boundaries and population table. Verify the join fields and reference year.":"Loaded a boundary dataset from GitHub. No population table was loaded.");return true;}
     return false;
-  }catch(err){console.warn(err);status.textContent="GitHub scan unavailable: "+err.message+". Falling back to public boundaries.";return false;}
+  }catch(err){console.warn(err);status.textContent="GitHub scan unavailable: "+err.message+". Check repository access and try Scan GitHub data files.";return false;}
 }
-
 function locateUser(){
   const out=$("gpsStatus");
   if(!navigator.geolocation){out.textContent="Browser geolocation is not supported.";return;}
@@ -762,12 +807,19 @@ $("geoFile").addEventListener("change",async e=>{
 $("csvFile").addEventListener("change",async e=>{
   const file=e.target.files[0];if(!file)return;
   try {
-    const text=await file.text();
-    const parsed=parseCSV(text);
+    let parsed,source=file.name;
+    if(/\\.zip$/i.test(file.name)){
+      if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
+      const archive=await JSZip.loadAsync(await file.arrayBuffer());
+      const entries=Object.values(archive.files).filter(f=>!f.dir&&/\\.csv$/i.test(f.name));
+      if(!entries.length)throw new Error("No CSV file found inside the ZIP archive.");
+      entries.sort((a,b)=>(/population/i.test(b.name)?1:0)-(/population/i.test(a.name)?1:0));
+      parsed=parseCSV(await entries[0].async("text"));source+=" → "+entries[0].name;
+    }else parsed=parseCSV(await file.text());
     csvHeaders=parsed.headers;csvRows=parsed.rows;
     fillSelect("joinCsvField",csvHeaders);
-    message(`Loaded ${csvRows.length} CSV records from ${file.name}. Choose the matching join fields.`);
-  } catch(err) {message("CSV could not be read: "+err.message);}
+    message(`Loaded ${csvRows.length} records from ${source}. Choose the matching join fields.`);
+  } catch(err) {message("CSV/ZIP could not be read: "+err.message);}
 });
 
 function parseCSV(text) {
