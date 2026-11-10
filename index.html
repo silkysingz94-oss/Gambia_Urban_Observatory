@@ -656,7 +656,7 @@ async function autoLoadGithubAssets(manual=false){
     // This avoids depending on GitHub tree discovery and ensures the CSV selector is populated early.
     try{
       const primaryPath=zip.slice().sort((a,b)=>{
-        const score=p=>{const v=p.toLowerCase().replace(/\\\\/g,"/");return (/(^|\\/)population\\/population\\.zip$/.test(v)?1000:0)+(/population/i.test(v)?100:0)+(/(^|\\/)population\\.zip$/.test(v)?50:0);};
+        const score=p=>{const v=p.toLowerCase().replace(/\\/g,"/");return (/(^|\/)population\/population\.zip$/.test(v)?1000:0)+(/population/i.test(v)?100:0)+(/(^|\/)population\.zip$/.test(v)?50:0);};
         return score(b)-score(a);
       })[0]||"Population.zip";
       const primaryUrl="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+primaryPath.split("/").map(encodeURIComponent).join("/");
@@ -837,7 +837,7 @@ $("csvFile").addEventListener("change",async e=>{
       const archive=await JSZip.loadAsync(await file.arrayBuffer());
       const entries=Object.values(archive.files).filter(f=>!f.dir&&/\.csv$/i.test(f.name));
       if(!entries.length)throw new Error("No CSV file found inside the ZIP archive. Check that the ZIP contains population/population.csv.");
-      const score=n=>{const v=String(n||"").replace(/\\\\/g,"/").toLowerCase().replace(/^\.\\//,"");return (/(^|\\/)population\\/population\\.csv$/.test(v)?1000:0)+(/(^|\\/)population\\.csv$/.test(v)?500:0)+(/population/i.test(v)?100:0);};
+      const score=n=>{const v=String(n||"").replace(/\\/g,"/").toLowerCase().replace(/^\.\//,"");return (/(^|\/)population\/population\.csv$/.test(v)?1000:0)+(/(^|\/)population\.csv$/.test(v)?500:0)+(/population/i.test(v)?100:0);};
       entries.sort((a,b)=>score(b.name)-score(a.name)||a.name.localeCompare(b.name));
       let loaded=false,lastError=null;
       for(const entry of entries){
