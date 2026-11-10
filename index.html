@@ -655,7 +655,10 @@ async function autoLoadGithubAssets(manual=false){
     // Load the known population archive directly before attempting any other repository assets.
     // This avoids depending on GitHub tree discovery and ensures the CSV selector is populated early.
     try{
-      const primaryPath=zip.find(p=>p.toLowerCase().endsWith("population.zip"))||"Population.zip";
+      const primaryPath=zip.slice().sort((a,b)=>{
+        const score=p=>{const v=p.toLowerCase().replace(/\\\\/g,"/");return (/(^|\\/)population\\/population\\.zip$/.test(v)?1000:0)+(/population/i.test(v)?100:0)+(/(^|\\/)population\\.zip$/.test(v)?50:0);};
+        return score(b)-score(a);
+      })[0]||"Population.zip";
       const primaryUrl="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+primaryPath.split("/").map(encodeURIComponent).join("/");
       const primary=await readCSVAsset(primaryPath,primaryUrl);
       applyRepositoryCSV(primary.parsed,primary.source);
@@ -833,14 +836,20 @@ $("csvFile").addEventListener("change",async e=>{
       if(typeof JSZip==="undefined")throw new Error("ZIP library did not load.");
       const archive=await JSZip.loadAsync(await file.arrayBuffer());
       const entries=Object.values(archive.files).filter(f=>!f.dir&&/\.csv$/i.test(f.name));
-      if(!entries.length)throw new Error("No CSV file found inside the ZIP archive.");
-      entries.sort((a,b)=>(/population/i.test(b.name)?1:0)-(/population/i.test(a.name)?1:0));
-      parsed=parseCSV(await entries[0].async("text"));source+=" → "+entries[0].name;
+      if(!entries.length)throw new Error("No CSV file found inside the ZIP archive. Check that the ZIP contains population/population.csv.");
+      const score=n=>{const v=String(n||"").replace(/\\\\/g,"/").toLowerCase().replace(/^\.\\//,"");return (/(^|\\/)population\\/population\\.csv$/.test(v)?1000:0)+(/(^|\\/)population\\.csv$/.test(v)?500:0)+(/population/i.test(v)?100:0);};
+      entries.sort((a,b)=>score(b.name)-score(a.name)||a.name.localeCompare(b.name));
+      let loaded=false,lastError=null;
+      for(const entry of entries){
+        try{const candidate=parseCSV(await entry.async("text"));if(candidate.rows.length){parsed=candidate;source+=" → "+entry.name;loaded=true;break;}}
+        catch(err){lastError=err;}
+      }
+      if(!loaded)throw new Error("CSV files were found but none could be parsed."+ (lastError?" "+lastError.message:""));
     }else parsed=parseCSV(await file.text());
     csvHeaders=parsed.headers;csvRows=parsed.rows;
     fillSelect("joinCsvField",csvHeaders);
-    message(`Loaded ${csvRows.length} records from ${source}. Choose the matching join fields.`);
-  } catch(err) {message("CSV/ZIP could not be read: "+err.message);}
+    message(`Loaded ${csvRows.length.toLocaleString()} records from ${source}. CSV join-key options are now available.`);
+  } catch(err) {console.error("CSV/ZIP upload failed",err);message("CSV/ZIP could not be read: "+err.message+" Check the archive structure and try again.");}
 });
 
 function parseCSV(text) {
