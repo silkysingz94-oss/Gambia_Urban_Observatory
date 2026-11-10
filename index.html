@@ -651,7 +651,19 @@ async function autoLoadGithubAssets(manual=false){
     githubAssetPaths=geo.concat(stats);
     if(!geo.length&&!stats.length){status.textContent="No GeoJSON, CSV or population ZIP assets found in this repository.";return false;}
     const score=p=>{const v=p.toLowerCase();return (/census.*ea|ea.*census|enumeration|gambiaea|census_eas/.test(v)?100:0)+(/boundary|admin|district|ward|geojson/.test(v)?25:0)-(/sample|metadata|style|config|package|readme/.test(v)?80:0);};
-    let boundaryLoaded=false,csvLoaded=0,loadedCSVNames=[];
+    let boundaryLoaded=false,csvLoaded=0,loadedCSVNames=[],statErrors=[];
+    // Load the known population archive directly before attempting any other repository assets.
+    // This avoids depending on GitHub tree discovery and ensures the CSV selector is populated early.
+    try{
+      const primaryPath=zip.find(p=>p.toLowerCase().endsWith("population.zip"))||"Population.zip";
+      const primaryUrl="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+primaryPath.split("/").map(encodeURIComponent).join("/");
+      const primary=await readCSVAsset(primaryPath,primaryUrl);
+      applyRepositoryCSV(primary.parsed,primary.source);
+      csvLoaded++;loadedCSVNames.push(primary.source);
+    }catch(e){
+      statErrors.push("Population.zip: "+e.message);
+      console.warn("Primary population archive could not be loaded",e);
+    }
     for(const path of geo.slice().sort((a,b)=>score(b)-score(a))){
       try{
         const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
@@ -667,17 +679,18 @@ async function autoLoadGithubAssets(manual=false){
       const score=p=>(/population\.zip$/i.test(p)?200:0)+(/population/i.test(p)?100:0)+(/\.zip$/i.test(p)?20:0);
       return score(b)-score(a);
     });
-    for(const path of orderedStats){
-      try{
-        const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
-        const result=await readCSVAsset(path,url);
-        applyRepositoryCSV(result.parsed,result.source);
-        csvLoaded++;loadedCSVNames.push(result.source);
-        // The population archive is the primary population table; avoid overwriting it with other CSVs.
-        if(/population/i.test(path))break;
-      }catch(e){console.warn("Skipped GitHub statistical asset",path,e);}
+    if(!csvLoaded){
+      for(const path of orderedStats){
+        try{
+          const url="https://raw.githubusercontent.com/silkysingz94-oss/Gambia_Urban_Observatory/main/"+path.split("/").map(encodeURIComponent).join("/");
+          const result=await readCSVAsset(path,url);
+          applyRepositoryCSV(result.parsed,result.source);
+          csvLoaded++;loadedCSVNames.push(result.source);
+          if(/population/i.test(path))break;
+        }catch(e){statErrors.push(path+": "+e.message);console.warn("Skipped GitHub statistical asset",path,e);}
+      }
     }
-    status.textContent="Repository scan: "+geo.length+" boundary JSON candidate(s), "+csv.length+" loose CSV file(s), "+zip.length+" population ZIP file(s); "+(boundaryLoaded?"boundary loaded":"no polygon boundary found")+"; "+csvLoaded+" statistical table(s) loaded"+(loadedCSVNames.length?" ("+loadedCSVNames.join("; ")+")":"")+".";
+    status.textContent="Repository scan: "+geo.length+" boundary JSON candidate(s), "+csv.length+" loose CSV file(s), "+zip.length+" population ZIP file(s); "+(boundaryLoaded?"boundary loaded":"no polygon boundary found")+"; "+csvLoaded+" statistical table(s) loaded"+(loadedCSVNames.length?" ("+loadedCSVNames.join("; ")+")":"")+(statErrors.length?" | Load detail: "+statErrors.join(" | "):"")+".";
     if(boundaryLoaded){message(csvLoaded?"Loaded GitHub boundaries and population table. Verify the join fields and reference year.":"Loaded a boundary dataset from GitHub. No population table was loaded.");return true;}
     return false;
   }catch(err){console.warn(err);status.textContent="GitHub scan unavailable: "+err.message+". Check repository access and try Scan GitHub data files.";return false;}
